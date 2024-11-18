@@ -45,7 +45,7 @@ class Network(object) :
         return Model(inp, x, name = 'GuessedEmbedding')
 
     def __call__(self, state, guessed) :
-        return self.full_model.predict([state,guessed]).flatten()
+        return self.full_model.predict([state,guessed], verbose=0).flatten()
     
     def fit(self, *args, **kwargs) :
         return self.full_model.fit(*args, **kwargs)

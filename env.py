@@ -48,13 +48,24 @@ class Hangman(object) :
         self.false_reward = false_reward
         self.verbose = verbose
         self.repeated_guessing_penalty = repeated_guessing_penalty
+        self.game_won = False
         
     def pick_random(self) :
         self.guess_word = np.random.choice(self.words)
+    
+    def get_current_live(self) :
+        return self.curr_live
+    
+    def is_game_won(self) :
+        return self.game_won
         
-    def reset(self) :
+    def reset(self, guess_word = None) :
         self.curr_live = self.max_lives
-        self.pick_random()
+        self.game_won = False
+        if guess_word is not None :
+            self.guess_word = guess_word
+        else :
+            self.pick_random()
         self.guessing_board = ['-' for i in range(len(self.guess_word))]
         self.correct_guess = 0
         self.guessed = []
@@ -92,6 +103,7 @@ class Hangman(object) :
                     self.correct_guess += 1
             if self.correct_guess == len(self.guess_word) :
                 self.done = True
+                self.game_won = True
                 if self.verbose :
                     print('You Win')
                     print('Word is', self.guess_word)
