@@ -183,7 +183,7 @@ class NNAgent(Agent) :
         new_input = []
         for l in state :
             new_input.append(letter_dict[l])
-        state = pad_sequences([new_input], maxlen = self.maxlen)
+        state = pad_sequences([new_input], maxlen = self.maxlen, padding="post")
         if self.is_training :
             self.episode_memory.append((state,self.get_guessed_mat()))
         return state, self.get_guessed_mat()
