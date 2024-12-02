@@ -96,6 +96,21 @@ class Hangman(object) :
                 print(f'>> {gameboard} | {self.curr_live}')
         
     def step(self, letter) :
+        # check if agent is doubting
+        if letter == '?':
+            # agent is wrong in doubting, game continues if lives are left
+            self.curr_live -= 1
+            # check if the game is lost
+            if self.curr_live == 0 :
+                self.done = True
+                self.show_status('Doubt False, You Lose')
+                if self.verbose :
+                    print(f"Word is '{self.guess_word}'")
+                return self.get_gameboard(), self.lose_reward, self.done, {'ans' : self.guess_word}
+            else :
+                self.show_status('Doubt False, Game Continues')
+                return self.get_gameboard(), self.false_reward, self.done, {}
+
         # check if the letter is in alphabet
         if not(letter.isalpha()) :
             raise TypeError('Can only accept alphabet')
