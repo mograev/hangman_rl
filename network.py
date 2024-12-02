@@ -1,10 +1,8 @@
 import os
-#os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"   # see issue #152
-#os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 import numpy as np
 
-from keras.layers import LSTM, Embedding, Input, Dense, GlobalAveragePooling1D, Concatenate,Bidirectional
+from keras.layers import LSTM, Embedding, Input, Dense, GlobalAveragePooling1D, Concatenate, Bidirectional
 from keras.models import Model
 from keras import optimizers, backend as K
 
@@ -12,7 +10,7 @@ from warnings import filterwarnings
 
 filterwarnings('ignore')
 import random
-from utils import letter_dict, letters, pad_sequences
+from utils import letter_dict, letters, pad_sequences, cheat_letters
 
 class Network(object) :
     """Define the network
@@ -23,26 +21,26 @@ class Network(object) :
     def __init__(self, maxlen = 29) :
         state_embedding = self.get_state_embedding(maxlen)
         guessed_embedding = self.get_guessed_embedding()
-        x = Concatenate()([state_embedding.output, guessed_embedding.output])
-        x = Dense(100, activation = 'tanh')(x)
-        x = Dense(26, activation = 'softmax')(x)
+        x = Concatenate(name='concatenate')([state_embedding.output, guessed_embedding.output])
+        x = Dense(100, activation = 'tanh', name='dense')(x)
+        x = Dense(26, activation = 'softmax', name='output')(x)
         self.full_model = Model([state_embedding.input, guessed_embedding.input], x, name = 'fullmodel')
         self.compile()
         
     def get_state_embedding(self, maxlen = 29) :
-        inp = Input(shape = (maxlen,))
-        x = Embedding(30,100, mask_zero = True)(inp)
-        x = Bidirectional(LSTM(100 , dropout = 0.2, return_sequences=True))(x)
-        x = Bidirectional(LSTM(100, dropout = 0.2 , return_sequences=True))(x)
-        x = GlobalAveragePooling1D()(x)
-        x = Dense(100, activation = 'tanh')(x)
-        return Model(inp,x , name = 'StateEmbedding')
+        inp = Input(shape = (maxlen,), name='state_input')
+        x = Embedding(30, 100, mask_zero = True, name='state_embedding')(inp)
+        x = Bidirectional(LSTM(100 , dropout = 0.2, return_sequences=True), name='state_bilstm_1')(x)
+        x = Bidirectional(LSTM(100, dropout = 0.2 , return_sequences=True), name='state_bilstm_2')(x)
+        x = GlobalAveragePooling1D(name='state_pooling')(x)
+        x = Dense(100, activation = 'tanh', name='state_dense')(x)
+        return Model(inp, x, name='state_model')
     
     def get_guessed_embedding(self) :
-        inp = Input(shape = (26,))
-        x = Dense(60, activation = 'tanh')(inp)
-        x = Dense(60, activation = 'tanh')(x)
-        return Model(inp, x, name = 'GuessedEmbedding')
+        inp = Input(shape = (26,), name='guessed_input')
+        x = Dense(60, activation = 'tanh', name='guessed_dense_1')(inp)
+        x = Dense(60, activation = 'tanh', name='guessed_dense_2')(x)
+        return Model(inp, x, name='guessed_model')
 
     def __call__(self, state, guessed) :
         return self.full_model.predict([state,guessed], verbose=0).flatten()
@@ -122,7 +120,7 @@ class Agent(object) :
 
     def select_action(self,state) :            
         probs = self.get_probs(state)
-        if self._policy == 'greedy' :
+        if self._policy == 'greedy' :            
             i = 1
             sorted_probs = probs.argsort()
             while letters[sorted_probs[-i]] in self.guessed :
@@ -187,6 +185,133 @@ class NNAgent(Agent) :
         if self.is_training :
             self.episode_memory.append((state,self.get_guessed_mat()))
         return state, self.get_guessed_mat()
+
+
+class CheatAgent(NNAgent) :
+
+    def __init__(self, model, maxlen=29, policy='eps-greedy', epsilon=0.1) :
+        super().__init__(model, maxlen)
+
+        # override policy
+        if policy not in ['eps-greedy', 'greedy', 'stochastic'] :
+            raise ValueError('Policy can only be eps-greedy, greedy, or stochastic')
+        self.policy = policy
+        
+        # epsilon greedy parameters
+        self.epsilon = epsilon
+
+
+    def load_pretrained_agent(self, model_path) :
+        self.model.load_weights(model_path)
+
+        # rebuild the output layer
+        new_output_dim = 27
+        x = self.model.full_model.get_layer('dense').output
+        x = Dense(new_output_dim, activation='softmax', name='new_output')(x)
+        self.model.full_model = Model(self.model.full_model.input, x, name='fullmodel')
+
+        # compile the model
+        self.model.compile()
+
+    def load_weights(self, model_path) :
+        # change the output layer to have 27 output dimensions
+        new_output_dim = 27
+        x = self.model.full_model.get_layer('dense').output
+        x = Dense(new_output_dim, activation='softmax', name='new_output')(x)
+        self.model.full_model = Model(self.model.full_model.input, x, name='fullmodel')
+
+        # load the weights
+        self.model.load_weights(model_path)
+
+        # compile the model
+        self.model.compile()
+
+    def finalize_episode(self, answer):
+        # 0. extract answer and episode information
+        cheated = answer['cheated'] if 'cheated' in answer else None
+        cheated_step = answer['cheated_step'] if 'cheated_step' in answer else None
+        cheated_letter = answer['cheated_letter'] if 'cheated_letter' in answer else None
+        doubted = answer['doubted'] if 'doubted' in answer else None
+        doubted_step = answer['doubted_step'] if 'doubted_step' in answer else None
+        answer = answer['ans']
+        len_ep = len(self.episode_memory)
+        # 1. unzip the episode memory
+        inp_1, inp_2 = zip(*self.episode_memory)
+        # 2. stack the game state matrix
+        inp_1 = np.vstack(list(inp_1)).astype(float)
+        # 3. stack the one hot-encoded guessed matrix
+        inp_2 = np.vstack(list(inp_2)).astype(float)
+        # 4. compute the unused letters one-hot encoded
+        obj = 1.0 - inp_2
+        # 5. update obj to assign 1 to the letter on which the env cheated
+        if cheated:
+            # update obj from the step the environment cheated
+            for i in range(cheated_step, len_ep):
+                obj[i][cheat_letters.index(cheated_letter)] = 1
+        # 6. add a column for the doubt action
+        obj = np.hstack([obj, np.ones((obj.shape[0], 1))])
+        if doubted:
+            obj[doubted_step][-1] = 0
+        # 7. get mask from correct answer
+        correct_mask = np.array([[1 if l in answer else 0 for l in letters]])
+        # 8. repeat the mask for each step in the episode
+        correct_mask = np.repeat(correct_mask, len_ep, axis=0).astype(float)
+        # 9. update mask based on whether the environment cheated
+        correct_mask = np.hstack([correct_mask, np.zeros((len_ep, 1))])
+        if cheated:
+            # update mask from the step the environment cheated
+            for i in range(cheated_step, len_ep):
+                correct_mask[i][-1] = 1
+        # 10. the correct action is choosing the letters that are both unused AND exist in the word
+        obj = correct_mask * obj
+        # 11. normalize so it sums to one
+        obj /= obj.sum(axis=1).reshape(-1, 1)
+        # 12. if doubted correctly, obj for this last step should be all zeros
+        if cheated and doubted and doubted_step == len_ep - 1:
+            obj[-1] = np.zeros(obj.shape[1])
+        self.states_history.append((inp_1, inp_2, obj))
+        self.episode_memory = []
+        self.reset_guessed()
+        # debug
+        if np.isnan(obj).any():
+            print(answer)
+            print(inp_1)
+            print(inp_2)
+            print(obj)
+            print(cheated, cheated_step, cheated_letter, doubted, doubted_step)
+
+    def train_model(self):
+        # account for new target output dimension
+        inp_1, inp_2, obj = zip(*self.states_history)
+        inp_1 = np.vstack(list(inp_1)).astype(float)
+        inp_2 = np.vstack(list(inp_2)).astype(float)
+        obj = np.vstack(list(obj)).astype(float)
+        loss = self.model.train_on_batch([inp_1, inp_2], obj)
+        self.states_history = []
+        return loss
+
+    def select_action(self, state):
+        probs = self.get_probs(state)
+        if self.policy == 'eps-greedy' and np.random.rand() < self.epsilon:
+            guess = random.choice(cheat_letters)
+            idx_act = cheat_letters.index(guess)
+        elif self.policy == 'stochastic':
+            idx_act = np.random.choice(np.arange(probs.shape[0]), p = probs)
+        else:
+            # greedy
+            i = 1
+            sorted_probs = probs.argsort()
+            while cheat_letters[sorted_probs[-i]] in self.guessed:
+                i+= 1
+            idx_act = sorted_probs[-i]
+        guess = cheat_letters[idx_act]
+        if guess not in self.guessed and guess != '?':
+            self.guessed.append(guess)
+        return guess
+    
+    def train(self) :
+        self.is_training = True
+        self.set_policy('eps-greedy')
 
 
 

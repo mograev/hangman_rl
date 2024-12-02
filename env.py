@@ -41,6 +41,8 @@ class Hangman(object) :
         else :
             with open(word_src, 'r') as f :
                 self.words = f.read().splitlines()
+        # maximum word length
+        self.maxlen = max(map(len, self.words))
         self.max_lives = max_lives
         self.win_reward = win_reward
         self.correct_reward = correct_reward
@@ -55,6 +57,9 @@ class Hangman(object) :
     
     def get_current_live(self) :
         return self.curr_live
+    
+    def get_guess_word(self) :
+        return self.guess_word
     
     def set_max_lives(self, max_lives) :
         self.max_lives = max_lives
@@ -151,13 +156,61 @@ class HangmanCheat(Hangman):
                  repeated_guessing_penalty = -100,
                  lose_reward = -0, 
                  false_reward = -0,
-                 verbose = False,
-                 reject_rate = 0.1) :
+                 reject_rate = 0.1,
+                 verbose = False) :
         super().__init__(word_src, max_lives, win_reward, correct_reward, repeated_guessing_penalty, lose_reward, false_reward, verbose)
         self.reject_rate = reject_rate
+        self.cheated = False
+        self.cheated_step = 0
+        self.cheated_letter = ''
+        self.doubted = False
+        self.doubted_step = 0
+
+
+    def reset(self, guess_word = None) :
+        self.cheated = False
+        self.cheated_step = -1
+        self.cheated_letter = ''
+        self.doubted = False
+        self.doubted_step = -1
+        return super().reset(guess_word)
 
 
     def step(self, letter) :
+        # count the step number to know at which env started cheating
+        if not self.cheated:
+            self.cheated_step += 1
+        if not self.doubted:
+            self.doubted_step += 1
+
+        # check if agent is doubting
+        if letter == '?':
+            self.doubted = True
+            # check if the agent is correct in doubting
+            if self.cheated:
+                # agent is correct in doubting and wins the game
+                self.done = True
+                self.game_won = True
+                self.show_status('Doubt Correct')
+                if self.verbose :
+                    print(f"Word is '{self.guess_word}'")
+                # print("Doubted correctly")
+                return self.get_gameboard(), self.win_reward, self.done, {'ans' : self.guess_word, 'cheated' : self.cheated, 'cheated_step' : self.cheated_step, 'cheated_letter' : self.cheated_letter,'doubted' : self.doubted, 'doubted_step' : self.doubted_step}
+            else:
+                # agent is wrong in doubting, game continues if lives are left
+                self.curr_live -= 1
+                # print("Doubted falsely")
+                # check if the game is lost
+                if self.curr_live == 0 :
+                    self.done = True
+                    self.show_status('Doubt False, You Lose')
+                    if self.verbose :
+                        print(f"Word is '{self.guess_word}'")
+                    return self.get_gameboard(), self.lose_reward, self.done, {'ans' : self.guess_word, 'cheated' : self.cheated, 'doubted' : self.doubted, 'doubted_step' : self.doubted_step}
+                else :
+                    self.show_status('Doubt False, Game Continues')
+                    return self.get_gameboard(), self.false_reward, self.done, {}
+
         # check if the letter is in alphabet
         if not(letter.isalpha()) :
             raise TypeError('Can only accept alphabet')
@@ -175,7 +228,9 @@ class HangmanCheat(Hangman):
         # check if the guessed letter is in the word
         if letter in self.guess_word :
             # NEW: Reject the guess with a certain probability
-            if np.random.rand() < self.reject_rate:
+            if not self.cheated and np.random.rand() < self.reject_rate:
+                self.cheated = True
+                self.cheated_letter = letter
                 # remove the letter from the guessed list
                 self.guessed.remove(letter)
                 self.show_status('Rejected guess')
@@ -192,7 +247,7 @@ class HangmanCheat(Hangman):
                 self.show_status('You Win')
                 if self.verbose :
                     print(f"Word is '{self.guess_word}'")
-                return self.guess_word, self.win_reward, self.done, {'ans' : self.guess_word}
+                return self.guess_word, self.win_reward, self.done, {'ans' : self.guess_word, 'cheated' : self.cheated, 'cheated_step': self.cheated_step, 'cheated_letter' : self.cheated_letter, 'doubted' : self.doubted, 'doubted_step' : self.doubted_step}
             else :                
                 self.show_status()
                 return self.get_gameboard(), self.correct_reward, self.done, {}
@@ -204,7 +259,7 @@ class HangmanCheat(Hangman):
                 self.show_status('You Lose')
                 if self.verbose :
                     print(f"Word is '{self.guess_word}'")
-                return self.get_gameboard(), self.lose_reward, self.done, {'ans' : self.guess_word}
+                return self.get_gameboard(), self.lose_reward, self.done, {'ans' : self.guess_word, 'cheated' : self.cheated, 'cheated_step': self.cheated_step, 'cheated_letter' : self.cheated_letter, 'doubted' : self.doubted, 'doubted_step' : self.doubted_step}
             else :
                 self.show_status()
                 return self.get_gameboard(), self.false_reward, self.done, {}

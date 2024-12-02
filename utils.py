@@ -13,6 +13,10 @@ letters.sort()
 letter_dict = {l : i+1 for i, l in enumerate(letters)}
 letter_dict['-'] = 27
 
+cheat_letters = list(string.ascii_lowercase) + ['?']
+cheat_letter_dict = {l : i for i, l in enumerate(cheat_letters)}
+cheat_letter_dict['-'] = 28
+
 def pad_sequences(sequences, maxlen=None, dtype='int32',
                   padding='pre', truncating='pre', value=0.):
     """Pads sequences to the same length.

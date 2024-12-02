@@ -102,3 +102,61 @@ class HangmanTrainer:
 
         print('Training Done')
         return self.player
+    
+
+    def fine_tune(self, env, n_trials=5000, save_episode=500, save_episode_init=0, view_episode=500):
+        """
+        Fine-tune the agent using the given environment.
+        
+        Parameters
+        ----------
+        env : Hangman
+            The environment to train the agent on.
+        n_trials : int
+            The number of episodes to fine-tune the agent.
+        save_episode : int
+            The number of episodes before saving the model.
+        save_episode_init : int
+            The number of episodes the model has already been fine-tuned.
+        view_episode : int
+            The number of episodes before printing the average correct per episode.
+        """
+
+        avg_correct = 0
+        wins_avg = 0
+        progbar = tqdm(range(n_trials))
+        times_saved = 0
+
+        for episode_set in progbar:
+            state = env.reset()
+            while env.get_guess_word() == "TRUE":
+                state = env.reset()
+            done = False
+            correct_count = 0
+            while not done:
+                guess = self.player.select_action(state)
+                state, reward, done, ans = env.step(guess)
+                if reward > 0:
+                    correct_count += 1.0
+                if reward == env.win_reward:
+                    wins_avg += 1.0
+            self.player.finalize_episode(ans)
+            loss = self.player.train_model()
+            progbar.set_description("Loss : {:.3f}              ".format(loss))
+            
+            avg_correct += correct_count
+            if (episode_set + 1) % view_episode == 0:
+                views = (episode_set + 1, avg_correct/view_episode, view_episode, wins_avg/view_episode)
+                print('Episode {} -------- Average Correct Count : {:.3f}     Last {} winrate : {:.3f}'.format(*views))
+                if loss is not None:
+                    print('Loss :', loss)
+                    print()
+                    avg_correct = 0
+                    wins_avg = 0
+
+            if (episode_set + 1) % save_episode == 0:
+                times_saved += 1
+                self.player.model.save(f"{self.save_path}_{save_episode_init+times_saved*save_episode}.h5", include_optimizer=False)
+
+        print('Fine-tuning Done')
+        return self.player
